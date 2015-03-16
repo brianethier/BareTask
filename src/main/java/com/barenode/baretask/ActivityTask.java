@@ -8,9 +8,9 @@ import android.os.Build;
 public abstract class ActivityTask<PROGRESS, RESULT> {
 
     public interface OnTaskCompleteListener<PROGRESS, RETURN> {
-        public void onTaskComplete(ActivityTask<PROGRESS, RETURN> activityTask, RETURN value);
-        public void onTaskProgress(ActivityTask<PROGRESS, RETURN> activityTask, PROGRESS value);
-        public void onTaskCancelled(ActivityTask<PROGRESS, RETURN> activityTask, RETURN value);
+        public void onTaskComplete(RETURN value);
+        public void onTaskProgress(PROGRESS value);
+        public void onTaskCancelled(RETURN value);
     }
 
     private final Context mContext;
@@ -69,18 +69,18 @@ public abstract class ActivityTask<PROGRESS, RESULT> {
     }
 
     private void onTaskComplete(RESULT result) {
-        mListener.onTaskComplete(this, result);
+        mListener.onTaskComplete(result);
         mListener = null;
     }
 
     private void onTaskProgress(PROGRESS... values) {
         if(values != null && values.length > 0) {
-            mListener.onTaskProgress(this, values[0]);
+            mListener.onTaskProgress(values[0]);
         }
     }
 
     private void onTaskCancelled(RESULT value) {
-        mListener.onTaskCancelled(this, value);
+        mListener.onTaskCancelled(value);
         mListener = null;
         onCancelled(value);
     }

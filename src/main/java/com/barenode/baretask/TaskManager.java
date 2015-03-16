@@ -41,14 +41,14 @@ public final class TaskManager {
 
     public interface TaskCallbacks<PROGRESS, RESULT> {
         public ActivityTask<PROGRESS, RESULT> onCreateTask(int id);
-        public void onTaskFinished(ActivityTask<PROGRESS, RESULT> activityTask, RESULT value);
-        public void onTaskProgress(ActivityTask<PROGRESS, RESULT> activityTask, PROGRESS value);
-        public void onTaskKilled(ActivityTask<PROGRESS, RESULT> activityTask);
+        public void onTaskFinished(int id, RESULT value);
+        public void onTaskProgress(int id, PROGRESS value);
+        public void onTaskKilled(int id);
     }
 
     public static abstract class TaskCallbacksAdapter<PROGRESS, RESULT> implements TaskCallbacks<PROGRESS, RESULT> {
-        public void onTaskProgress(ActivityTask<PROGRESS, RESULT> activityTask, PROGRESS value) {}
-        public void onTaskKilled(ActivityTask<PROGRESS, RESULT> activityTask) {}
+        public void onTaskProgress(int id, PROGRESS value) {}
+        public void onTaskKilled(int id) {}
     }
 
 
@@ -231,43 +231,42 @@ public final class TaskManager {
         }
 
         @Override
-        public void onTaskComplete(ActivityTask<Object, Object> activityTask, Object result) {
+        public void onTaskComplete(Object result) {
             mResult = result;
             mState = TaskState.COMPLETE;
             deliverResult();
         }
 
         @Override
-        public void onTaskProgress(ActivityTask<Object, Object> activityTask, Object progress) {
+        public void onTaskProgress(Object progress) {
             mProgress = progress;
             mProgressPublished = true;
             deliverProgress();
         }
 
         @Override
-        public void onTaskCancelled(ActivityTask<Object, Object> activityTask, Object result) {
+        public void onTaskCancelled(Object result) {
             resetState();
         }
 
         private void deliverResult() {
             if(mActive && mCallbacks != null && (mState == TaskState.COMPLETE || mState == TaskState.KILLED)) {
                 // Reset state before delivering results so that within callbacks, isTaskRunning will return false
-                ActivityTask<Object, Object> activityTask = mActivityTask;
                 Object result = mResult;
                 TaskState state = mState;
                 resetState();
                 if(state == TaskState.COMPLETE) {
-                    mCallbacks.onTaskFinished(activityTask, result);
+                    mCallbacks.onTaskFinished(mId, result);
                 }
                 else {
-                    mCallbacks.onTaskKilled(activityTask);
+                    mCallbacks.onTaskKilled(mId);
                 }
             }
         }
 
         private void deliverProgress() {
             if(mActive && mProgressPublished && mCallbacks != null && mState == TaskState.RUNNING) {
-                mCallbacks.onTaskProgress(mActivityTask, mProgress);
+                mCallbacks.onTaskProgress(mId, mProgress);
             }
         }
 
