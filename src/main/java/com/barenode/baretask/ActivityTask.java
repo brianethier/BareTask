@@ -9,7 +9,7 @@ public abstract class ActivityTask<PROGRESS, RESULT> {
 
     public interface OnTaskCompleteListener<PROGRESS, RETURN> {
         public void onTaskComplete(RETURN value);
-        public void onTaskProgress(PROGRESS value);
+        public void onTaskProgress(PROGRESS... progress);
         public void onTaskCancelled(RETURN value);
     }
 
@@ -74,8 +74,8 @@ public abstract class ActivityTask<PROGRESS, RESULT> {
     }
 
     private void onTaskProgress(PROGRESS... values) {
-        if(values != null && values.length > 0) {
-            mListener.onTaskProgress(values[0]);
+        if(values != null) {
+            mListener.onTaskProgress(values);
         }
     }
 

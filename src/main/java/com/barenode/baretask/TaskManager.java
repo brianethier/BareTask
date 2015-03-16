@@ -41,13 +41,13 @@ public final class TaskManager {
 
     public interface TaskCallbacks<PROGRESS, RESULT> {
         public ActivityTask<PROGRESS, RESULT> onCreateTask(int id);
-        public void onTaskFinished(int id, RESULT value);
-        public void onTaskProgress(int id, PROGRESS value);
+        public void onTaskFinished(int id, RESULT result);
+        public void onTaskProgress(int id, PROGRESS... progress);
         public void onTaskKilled(int id);
     }
 
     public static abstract class TaskCallbacksAdapter<PROGRESS, RESULT> implements TaskCallbacks<PROGRESS, RESULT> {
-        public void onTaskProgress(int id, PROGRESS value) {}
+        public void onTaskProgress(int id, PROGRESS... progress) {}
         public void onTaskKilled(int id) {}
     }
 
@@ -167,7 +167,7 @@ public final class TaskManager {
         private ActivityTask<Object, Object> mActivityTask;
         private TaskManager.TaskCallbacks<Object, Object> mCallbacks;
         private Object mResult;
-        private Object mProgress;
+        private Object[] mProgress;
         private boolean mProgressPublished;
         private boolean mActive;
         private TaskState mState = TaskState.IDLE;
@@ -238,7 +238,7 @@ public final class TaskManager {
         }
 
         @Override
-        public void onTaskProgress(Object progress) {
+        public void onTaskProgress(Object... progress) {
             mProgress = progress;
             mProgressPublished = true;
             deliverProgress();
