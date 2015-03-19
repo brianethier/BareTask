@@ -39,16 +39,16 @@ public final class TaskManager {
     }
 
 
-    public interface TaskCallbacks<PROGRESS, RESULT> {
-        public ActivityTask<PROGRESS, RESULT> onCreateTask(int id);
+    public interface TaskCallbacks<PARAMS, PROGRESS, RESULT> {
+        public ActivityTask<PARAMS, PROGRESS, RESULT> onCreateTask(int id);
+        public PARAMS onPrepareTask(int id);
         public void onTaskFinished(int id, RESULT result);
         public void onTaskProgress(int id, PROGRESS... progress);
         public void onTaskKilled(int id);
     }
 
-    public static abstract class TaskCallbacksAdapter<PROGRESS, RESULT> implements TaskCallbacks<PROGRESS, RESULT> {
+    public static abstract class TaskCallbacksAdapter<PARAMS, PROGRESS, RESULT> implements TaskCallbacks<PARAMS, PROGRESS, RESULT> {
         public void onTaskProgress(int id, PROGRESS... progress) {}
-        public void onTaskKilled(int id) {}
     }
 
 
@@ -88,14 +88,14 @@ public final class TaskManager {
         return info == null ? false : info.isRunning();
     }
 
-    public void registerCallbacks(int id, TaskCallbacks<?,?> callbacks) {
+    public void registerCallbacks(int id, TaskCallbacks<?,?,?> callbacks) {
         ActivityTaskInfo info = mTaskInfos.get(id);
         if(info == null) {
             info = new ActivityTaskInfo(id);
             info.setActive(mActive);
             mTaskInfos.put(id, info);
         }
-        info.setCallbacks((TaskCallbacks<Object, Object>) callbacks);
+        info.setCallbacks((TaskCallbacks<Object, Object, Object>) callbacks);
     }
 
     public void unregisterCallbacks(int id) {
@@ -111,12 +111,12 @@ public final class TaskManager {
         }
     }
 
-    public void startTask(int id) {
+    public <T> boolean startTask(int id) {
         ActivityTaskInfo info = mTaskInfos.get(id);
         if(info == null) {
             throw new IllegalStateException("Your must call registerCallbacks(...) before you can start a task!");
         }
-        info.createAndStart();
+        return info.createAndStart();
     }
 
     public void cancelTask(int id) {
@@ -164,8 +164,8 @@ public final class TaskManager {
     private static class ActivityTaskInfo implements ActivityTask.OnTaskCompleteListener<Object, Object> {
 
         private final int mId;
-        private ActivityTask<Object, Object> mActivityTask;
-        private TaskManager.TaskCallbacks<Object, Object> mCallbacks;
+        private ActivityTask<Object, Object, Object> mActivityTask;
+        private TaskManager.TaskCallbacks<Object, Object, Object> mCallbacks;
         private Object mResult;
         private Object[] mProgress;
         private boolean mProgressPublished;
@@ -190,7 +190,7 @@ public final class TaskManager {
             return mState != TaskState.IDLE;
         }
 
-        private void setCallbacks(TaskManager.TaskCallbacks<Object, Object> callbacks) {
+        private void setCallbacks(TaskManager.TaskCallbacks<Object, Object, Object> callbacks) {
             mCallbacks = callbacks;
         }
 
@@ -211,16 +211,18 @@ public final class TaskManager {
             mActivityTask = mCallbacks.onCreateTask(mId);
         }
 
-        private void createAndStart() {
+        private boolean createAndStart() {
             if(mCallbacks == null) {
                 throw new IllegalStateException("Make sure this worker has been registered!");
             }
             if(isWaitingForResult()) {
-                throw new IllegalStateException("You can't start the same worker until it has completed its work!");
+                return false;
             }
             mState = TaskState.RUNNING;
             mActivityTask = mCallbacks.onCreateTask(mId);
-            mActivityTask.start(mId, this);
+            Object params = mCallbacks.onPrepareTask(mId);
+            mActivityTask.start(mId, this, params);
+            return true;
         }
 
         private void cancel() {

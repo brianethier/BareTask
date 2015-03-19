@@ -8,32 +8,30 @@ import com.barenode.bareconnection.RestProperties;
 import com.barenode.baretask.ActivityTask;
 
 
-public class HttpPostTask extends ActivityTask<Void, HttpResponse> {
+public class HttpPostTask extends ActivityTask<Object, Void, HttpResponse> {
 
     private final RestConnection.Builder mBuilder;
-    private Object mValue;
 
 
-    public HttpPostTask(Context context, String url, Object value) {
-        this(context, new RestConnection.Builder().url(url), value);
+    public HttpPostTask(Context context, String url) {
+        this(context, new RestConnection.Builder().url(url));
     }
 
-    public HttpPostTask(Context context, RestProperties properties, Object value) {
-        this(context, new RestConnection.Builder().properties(properties), value);
+    public HttpPostTask(Context context, RestProperties properties) {
+        this(context, new RestConnection.Builder().properties(properties));
     }
 
-    public HttpPostTask(Context context, RestConnection.Builder builder, Object value) {
+    public HttpPostTask(Context context, RestConnection.Builder builder) {
         super(context);
         mBuilder = builder;
-        mValue = value;
     }
 
     @Override
-    public HttpResponse doInBackground() {
+    public HttpResponse doInBackground(Object value) {
         HttpResponse response = new HttpResponse();
         try {
             RestConnection connection = mBuilder.build();
-            String responseValue = connection.post(String.class, mValue);
+            String responseValue = connection.post(String.class, value);
             response.setResponse(responseValue);
         } catch (RestException e) {
             response.setException(e);

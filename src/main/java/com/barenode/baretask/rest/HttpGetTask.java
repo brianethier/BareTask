@@ -8,7 +8,7 @@ import com.barenode.bareconnection.RestProperties;
 import com.barenode.baretask.ActivityTask;
 
 
-public class HttpGetTask extends ActivityTask<Void, HttpResponse> {
+public class HttpGetTask extends ActivityTask<Void, Void, HttpResponse> {
 
     private final RestConnection.Builder mBuilder;
     private Object mValue;
@@ -28,7 +28,7 @@ public class HttpGetTask extends ActivityTask<Void, HttpResponse> {
     }
 
     @Override
-    public HttpResponse doInBackground() {
+    public HttpResponse doInBackground(Void params) {
         HttpResponse response = new HttpResponse();
         try {
             RestConnection connection = mBuilder.build();

@@ -5,7 +5,7 @@ import android.os.AsyncTask;
 import android.os.Build;
 
 
-public abstract class ActivityTask<PROGRESS, RESULT> {
+public abstract class ActivityTask<PARAMS, PROGRESS, RESULT> {
 
     public interface OnTaskCompleteListener<PROGRESS, RETURN> {
         public void onTaskComplete(RETURN value);
@@ -25,7 +25,7 @@ public abstract class ActivityTask<PROGRESS, RESULT> {
     }
 
 
-    public abstract RESULT doInBackground();
+    public abstract RESULT doInBackground(PARAMS param);
 
     public abstract void onCancelled(RESULT value);
 
@@ -54,17 +54,17 @@ public abstract class ActivityTask<PROGRESS, RESULT> {
         mTask.cancel(mayInterruptIfRunning);
     }
 
-    void start(int id, OnTaskCompleteListener<PROGRESS, RESULT> listener) {
+    void start(int id, OnTaskCompleteListener<PROGRESS, RESULT> listener, PARAMS params) {
         if(mTask.getStatus() != AsyncTask.Status.PENDING) {
             throw new IllegalStateException("Start on an ActivityTask can only be called once!");
         }
         mId = id;
         mListener = listener;
         if(Build.VERSION.SDK_INT >= 11) {
-            mTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+            mTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, params);
         }
         else {
-            mTask.execute();
+            mTask.execute(params);
         }
     }
 
@@ -87,10 +87,11 @@ public abstract class ActivityTask<PROGRESS, RESULT> {
 
 
 
-    private class InternalAsyncTask extends AsyncTask<Void, PROGRESS, RESULT> {
+    private class InternalAsyncTask extends AsyncTask<PARAMS, PROGRESS, RESULT> {
         @Override
-        protected RESULT doInBackground(Void... voids) {
-            return ActivityTask.this.doInBackground();
+        protected RESULT doInBackground(PARAMS... params) {
+            PARAMS param = params != null && params.length > 0 ? params[0] : null;
+            return ActivityTask.this.doInBackground(param);
         }
         @Override
         protected void onProgressUpdate(PROGRESS... values) {
