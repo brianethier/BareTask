@@ -6,21 +6,14 @@ import android.os.Handler;
 import android.util.SparseArray;
 
 import java.util.ArrayList;
+import java.util.List;
 
-
-public final class TaskManager {
+public final class TaskManager implements ActivityTask.OnTaskListener {
 
     private static final String TAG = TaskManager.class.getName() + "HSF48EHB732HR75HR63HE8";
 
-    private enum TaskState {
-        IDLE,
-        RUNNING,
-        COMPLETE,
-        KILLED
-    }
-
     @TargetApi(11)
-    public static final TaskManager findOrCreate(FragmentManager fm) {
+    public static TaskManager findOrCreate(FragmentManager fm) {
         RetainedNativeFragment fragment = (RetainedNativeFragment) fm.findFragmentByTag(TAG);
         if(fragment == null) {
             fragment = new RetainedNativeFragment();
@@ -29,7 +22,7 @@ public final class TaskManager {
         return fragment.getTaskManager();
     }
 
-    public static final TaskManager findOrCreate(android.support.v4.app.FragmentManager fm) {
+    public static TaskManager findOrCreate(android.support.v4.app.FragmentManager fm) {
         RetainedSupportFragment fragment = (RetainedSupportFragment) fm.findFragmentByTag(TAG);
         if(fragment == null) {
             fragment = new RetainedSupportFragment();
@@ -38,246 +31,139 @@ public final class TaskManager {
         return fragment.getTaskManager();
     }
 
-
-    public interface TaskCallbacks<PARAMS, PROGRESS, RESULT> {
-        public ActivityTask<PARAMS, PROGRESS, RESULT> onCreateTask(int id);
-        public PARAMS onPrepareTask(int id);
-        public void onTaskFinished(int id, RESULT result);
-        public void onTaskProgress(int id, PROGRESS... progress);
-        public void onTaskKilled(int id);
+    public interface TaskKilledListener {
+        void onTaskKilled(int id);
     }
 
-    public static abstract class TaskCallbacksAdapter<PARAMS, PROGRESS, RESULT> implements TaskCallbacks<PARAMS, PROGRESS, RESULT> {
-        public void onTaskProgress(int id, PROGRESS... progress) {}
+    public interface TaskCallbacks<Progress, Result> {
+        void onTaskProgress(ActivityTask task, Progress... progress);
+        void onTaskFinished(ActivityTask task, Result result);
     }
 
+    public static abstract class TaskCallbacksAdapter<Progress, Result> implements TaskCallbacks<Progress, Result> {
+        public void onTaskProgress(ActivityTask task, Progress... progress) {}
+    }
 
-    private final SparseArray<ActivityTaskInfo> mTaskInfos = new SparseArray<ActivityTaskInfo>(0);
+    private final SparseArray<TaskCallbacks> mRegisteredCallbacks = new SparseArray<TaskCallbacks>();
+    private final List<ActivityTask> mManagedTasks = new ArrayList<ActivityTask>();
+    private final List<Integer> mKilledTaskIds = new ArrayList<Integer>();
     private final Handler mHandler = new Handler();
-    private final Runnable mActiveTaskRunner = new Runnable() {
+    private final Runnable mResumeTaskRunner = new Runnable() {
         @Override
         public void run() {
-            // This is run once the fragment is started and all the registered Workers become active.
-            // So attempt delivery for any workers that finished when the activity was stopped or killed
-            recreateKilledTasks();
-            for (int i = mTaskInfos.size()-1; i >= 0; i--) {
-                ActivityTaskInfo info = mTaskInfos.valueAt(i);
-                if(info.isWaitingForResult()) {
-                    info.attemptDelivery();
-                }
+            processKilledTasks();
+            List<ActivityTask> managedTasks = new ArrayList<ActivityTask>(mManagedTasks);
+            for (ActivityTask task : managedTasks) {
+                task.deliverResults();
             }
         }
     };
-    private boolean mActive;
-    private ArrayList<Integer> mKilledTaskIds;
+    private TaskKilledListener mListener;
+    private boolean mResumed;
 
 
-    public ArrayList<Integer> getTaskIds() {
-        ArrayList<Integer> workerIds = new ArrayList<Integer>();
-        for (int i = mTaskInfos.size()-1; i >= 0; i--) {
-            ActivityTaskInfo info = mTaskInfos.valueAt(i);
-            if(info.isWaitingForResult()) {
-                workerIds.add(info.getId());
-            }
+    @Override
+    public void onTaskProgress(ActivityTask task, Object[] progress) {
+        TaskCallbacks callbacks = mRegisteredCallbacks.get(task.getId());
+        if (mResumed && callbacks != null) {
+            callbacks.onTaskProgress(task, progress);
         }
-        return workerIds;
     }
 
-    public boolean isTaskRunning(int id) {
-        ActivityTaskInfo info = mTaskInfos.get(id);
-        return info == null ? false : info.isRunning();
+    @Override
+    public void onTaskComplete(ActivityTask task, Object value) {
+        // First make sure we have a registered callback
+        TaskCallbacks callbacks = mRegisteredCallbacks.get(task.getId());
+        if (mResumed && callbacks != null) {
+            callbacks.onTaskFinished(task, value);
+            mManagedTasks.remove(task);
+        }
     }
 
-    public void registerCallbacks(int id, TaskCallbacks<?,?,?> callbacks) {
-        ActivityTaskInfo info = mTaskInfos.get(id);
-        if(info == null) {
-            info = new ActivityTaskInfo(id);
-            info.setActive(mActive);
-            mTaskInfos.put(id, info);
+    @Override
+    public void onTaskCancelled(ActivityTask task) {
+        mManagedTasks.remove(task);
+    }
+
+    public void registerTaskKilledListener(TaskKilledListener listener) {
+        mListener = listener;
+    }
+
+    public void unregisterTaskKilledListener() {
+        mListener = null;
+    }
+
+    public void registerCallbacks(int id, TaskCallbacks<?,?> callbacks) {
+        if(mResumed || mRegisteredCallbacks.get(id) != null) {
+            throw new IllegalStateException("You can only call registerCallbacks(...) once per id and before onResume().");
         }
-        info.setCallbacks((TaskCallbacks<Object, Object, Object>) callbacks);
+        mRegisteredCallbacks.put(id, callbacks);
     }
 
     public void unregisterCallbacks(int id) {
-        ActivityTaskInfo info = mTaskInfos.get(id);
-        if(info != null) {
-            info.setCallbacks(null);
+        if(mRegisteredCallbacks.get(id) != null) {
+            mRegisteredCallbacks.remove(id);
         }
     }
 
-    public void unregisterAllCallbacks() {
-        for (int i = mTaskInfos.size()-1; i >= 0; i--) {
-            mTaskInfos.valueAt(i).setCallbacks(null);
-        }
-    }
-
-    public <T> boolean startTask(int id) {
-        ActivityTaskInfo info = mTaskInfos.get(id);
-        if(info == null) {
-            throw new IllegalStateException("Your must call registerCallbacks(...) before you can start a task!");
-        }
-        return info.createAndStart();
-    }
-
-    public void cancelTask(int id) {
-        ActivityTaskInfo info = mTaskInfos.get(id);
-        if(info == null) {
-            throw new IllegalStateException("Your must call registerCallbacks(...) before you can start/cancel a task!");
-        }
-        info.cancel();
-    }
-
-    public void cancelAllTask() {
-        for(int i = mTaskInfos.size()-1; i >= 0; i--) {
-            mTaskInfos.valueAt(i).cancel();
-        }
-    }
-
-    void setTasksActive(boolean active) {
-        mActive = active;
-        for(int i = mTaskInfos.size()-1; i >= 0; i--) {
-            mTaskInfos.valueAt(i).setActive(active);
-        }
-        if(active) {
-            mHandler.post(mActiveTaskRunner);
-        }
-    }
-
-    void setKilledTaskIds(ArrayList<Integer> killedTaskIds) {
-        mKilledTaskIds = killedTaskIds;
-    }
-
-    private void recreateKilledTasks() {
-        if(mKilledTaskIds != null) {
-            for(Integer id : mKilledTaskIds) {
-                ActivityTaskInfo info = mTaskInfos.get(id);
-                if(info != null) {
-                    info.createAndSetKilled();
-                }
-            }
-            mKilledTaskIds = null;
-        }
-    }
-
-
-
-    private static class ActivityTaskInfo implements ActivityTask.OnTaskCompleteListener<Object, Object> {
-
-        private final int mId;
-        private ActivityTask<Object, Object, Object> mActivityTask;
-        private TaskManager.TaskCallbacks<Object, Object, Object> mCallbacks;
-        private Object mResult;
-        private Object[] mProgress;
-        private boolean mProgressPublished;
-        private boolean mActive;
-        private TaskState mState = TaskState.IDLE;
-
-
-        private ActivityTaskInfo(int id) {
-            mId = id;
-        }
-
-
-        private int getId() {
-            return mId;
-        }
-
-        private boolean isRunning() {
-            return mActivityTask != null && mActivityTask.isRunning();
-        }
-
-        private boolean isWaitingForResult() {
-            return mState != TaskState.IDLE;
-        }
-
-        private void setCallbacks(TaskManager.TaskCallbacks<Object, Object, Object> callbacks) {
-            mCallbacks = callbacks;
-        }
-
-        private void setActive(boolean active) {
-            mActive = active;
-            deliverProgress();
-        }
-
-        private void attemptDelivery() {
-            deliverResult();
-        }
-
-        private void createAndSetKilled() {
-            if(mCallbacks == null) {
-                throw new IllegalStateException("Make sure this worker has been registered!");
-            }
-            mState = TaskState.KILLED;
-            mActivityTask = mCallbacks.onCreateTask(mId);
-        }
-
-        private boolean createAndStart() {
-            if(mCallbacks == null) {
-                throw new IllegalStateException("Make sure this worker has been registered!");
-            }
-            if(isWaitingForResult()) {
-                return false;
-            }
-            mState = TaskState.RUNNING;
-            mActivityTask = mCallbacks.onCreateTask(mId);
-            Object params = mCallbacks.onPrepareTask(mId);
-            mActivityTask.start(mId, this, params);
-            return true;
-        }
-
-        private void cancel() {
-            if(mActivityTask != null) {
-                // Just cancel the worker here, onTaskCancelled() will be called
-                mActivityTask.cancel(false);
+    public boolean isTaskRunning(int id) {
+        for(ActivityTask task : mManagedTasks) {
+            if(task.getId() == id && task.isRunning()) {
+                return true;
             }
         }
+        return false;
+    }
 
-        @Override
-        public void onTaskComplete(Object result) {
-            mResult = result;
-            mState = TaskState.COMPLETE;
-            deliverResult();
+    public void processResult(int id, ActivityTask<?,?,?> task) {
+        task.setId(id);
+        task.registerListener(this);
+        mManagedTasks.add(task);
+        task.deliverResults();
+    }
+
+    ArrayList<Integer> getTaskIds() {
+        ArrayList<Integer> ids = new ArrayList<Integer>();
+        for (ActivityTask task : mManagedTasks) {
+            ids.add(task.getId());
         }
+        return ids;
+    }
 
-        @Override
-        public void onTaskProgress(Object... progress) {
-            mProgress = progress;
-            mProgressPublished = true;
-            deliverProgress();
+    void setKilledTaskIds(List<Integer> ids) {
+        mKilledTaskIds.clear();
+        mKilledTaskIds.addAll(ids);
+    }
+
+    void onResume() {
+        mResumed = true;
+        mHandler.post(mResumeTaskRunner);
+    }
+
+    void onPause() {
+        mResumed = false;
+    }
+
+    void onDestroy() {
+        // User hit the back button or called finish(), or OS cleaned up activity to reclaim resources
+        // Just cancel the workers so that the onCancelled(...) is triggered
+        for (int i = 0; i < mManagedTasks.size(); i++) {
+            mManagedTasks.get(i).cancel(false);
         }
+        mManagedTasks.clear();
+    }
 
-        @Override
-        public void onTaskCancelled(Object result) {
-            resetState();
-        }
+    void onDetach() {
+        // Clear all callbacks when the fragment is detached from it's activity!
+        mRegisteredCallbacks.clear();
+    }
 
-        private void deliverResult() {
-            if(mActive && mCallbacks != null && (mState == TaskState.COMPLETE || mState == TaskState.KILLED)) {
-                // Reset state before delivering results so that within callbacks, isTaskRunning will return false
-                Object result = mResult;
-                TaskState state = mState;
-                resetState();
-                if(state == TaskState.COMPLETE) {
-                    mCallbacks.onTaskFinished(mId, result);
-                }
-                else {
-                    mCallbacks.onTaskKilled(mId);
-                }
+    private void processKilledTasks() {
+        if(mResumed && mListener != null) {
+            for (Integer id : mKilledTaskIds) {
+                mListener.onTaskKilled(id);
             }
         }
-
-        private void deliverProgress() {
-            if(mActive && mProgressPublished && mCallbacks != null && mState == TaskState.RUNNING) {
-                mCallbacks.onTaskProgress(mId, mProgress);
-            }
-        }
-
-        private void resetState() {
-            mActivityTask = null;
-            mResult = null;
-            mProgress = null;
-            mProgressPublished = false;
-            mState = TaskState.IDLE;
-        }
+        mKilledTaskIds.clear();
     }
 }

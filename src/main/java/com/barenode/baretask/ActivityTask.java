@@ -4,31 +4,29 @@ import android.content.Context;
 import android.os.AsyncTask;
 import android.os.Build;
 
+public abstract class ActivityTask<Params, Progress, Result> {
 
-public abstract class ActivityTask<PARAMS, PROGRESS, RESULT> {
-
-    public interface OnTaskCompleteListener<PROGRESS, RETURN> {
-        public void onTaskComplete(RETURN value);
-        public void onTaskProgress(PROGRESS... progress);
-        public void onTaskCancelled(RETURN value);
+    interface OnTaskListener<Progress, Result> {
+        void onTaskProgress(ActivityTask task, Progress... progress);
+        void onTaskComplete(ActivityTask task, Result result);
+        void onTaskCancelled(ActivityTask task);
     }
 
     private final Context mContext;
-    private final InternalAsyncTask mTask;
-    private OnTaskCompleteListener<PROGRESS, RESULT> mListener;
+    private final InternalAsyncTask mInternalTask;
     private int mId;
-
+    private OnTaskListener<Progress, Result> mTaskListener;
+    private Progress[] mProgress;
+    private Result mResult;
+    private Exception mException;
+    private boolean mProgressPublished;
+    private boolean mCompleted;
+    private boolean mCancelled;
 
     public ActivityTask(Context context) {
         mContext = context.getApplicationContext();
-        mTask = new InternalAsyncTask();
+        mInternalTask = new InternalAsyncTask();
     }
-
-
-    public abstract RESULT doInBackground(PARAMS param);
-
-    public abstract void onCancelled(RESULT value);
-
 
     public Context getContext() {
         return mContext;
@@ -38,75 +36,125 @@ public abstract class ActivityTask<PARAMS, PROGRESS, RESULT> {
         return mId;
     }
 
-    public boolean isRunning() {
-        return mTask.getStatus() == AsyncTask.Status.RUNNING;
+    public boolean isSuccessful() {
+        return mCompleted && mException == null;
     }
 
-    public boolean isCancelled() {
-        return mTask.isCancelled();
+    public Exception getException() {
+        return mException;
     }
 
-    protected void publishProgress(PROGRESS progress) {
-        mTask.publishInternalProgress(progress);
+    public void execute(Params... params) {
+        if(mInternalTask.getStatus() != AsyncTask.Status.PENDING) {
+            throw new IllegalStateException("An ActivityTask can only be executed once!");
+        }
+        if(Build.VERSION.SDK_INT >= 11) {
+            mInternalTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, params);
+        }
+        else {
+            mInternalTask.execute(params);
+        }
+    }
+
+    public abstract Result doInBackground(Params... params) throws Exception;
+
+    public abstract void onCancelled(Result value);
+
+    protected boolean isCancelled() {
+        return mInternalTask.isCancelled();
+    }
+
+    protected void publishProgress(Progress... progress) {
+        mInternalTask.publishInternalProgress(progress);
     }
 
     protected void cancel(boolean mayInterruptIfRunning) {
-        mTask.cancel(mayInterruptIfRunning);
+        mInternalTask.cancel(mayInterruptIfRunning);
     }
 
-    void start(int id, OnTaskCompleteListener<PROGRESS, RESULT> listener, PARAMS params) {
-        if(mTask.getStatus() != AsyncTask.Status.PENDING) {
-            throw new IllegalStateException("Start on an ActivityTask can only be called once!");
-        }
+    void setId(int id) {
         mId = id;
-        mListener = listener;
-        if(Build.VERSION.SDK_INT >= 11) {
-            mTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, params);
+    }
+
+    void registerListener(OnTaskListener<Progress, Result> taskListener) {
+        mTaskListener = taskListener;
+    }
+
+    boolean isRunning() {
+        return mInternalTask.getStatus() == AsyncTask.Status.RUNNING;
+    }
+
+    void deliverResults() {
+        if(mTaskListener != null) {
+            if (mCancelled) {
+                mTaskListener.onTaskCancelled(this);
+            } else if (mCompleted) {
+                mTaskListener.onTaskComplete(this, mResult);
+            } else if (mProgressPublished) {
+                mTaskListener.onTaskProgress(this, mProgress);
+            }
         }
-        else {
-            mTask.execute(params);
-        }
     }
 
-    private void onTaskComplete(RESULT result) {
-        mListener.onTaskComplete(result);
-        mListener = null;
+    private void onTaskProgress(Progress... values) {
+        mProgressPublished = true;
+        mProgress = values;
+        deliverResults();
     }
 
-    private void onTaskProgress(PROGRESS... values) {
-        if(values != null) {
-            mListener.onTaskProgress(values);
-        }
+    private void onTaskComplete(Result result) {
+        mCompleted = true;
+        mResult = result;
+        deliverResults();
     }
 
-    private void onTaskCancelled(RESULT value) {
-        mListener.onTaskCancelled(value);
-        mListener = null;
-        onCancelled(value);
+    private void onTaskException(Exception exception) {
+        mCompleted = true;
+        mException = exception;
+        deliverResults();
+    }
+
+    private void onTaskCancelled(Result result) {
+        mCancelled = true;
+        onCancelled(result);
+        deliverResults();
     }
 
 
+    private class InternalAsyncTask extends AsyncTask<Params, Progress, Result> {
 
-    private class InternalAsyncTask extends AsyncTask<PARAMS, PROGRESS, RESULT> {
+        private Exception mException;
+
         @Override
-        protected RESULT doInBackground(PARAMS... params) {
-            PARAMS param = params != null && params.length > 0 ? params[0] : null;
-            return ActivityTask.this.doInBackground(param);
+        protected Result doInBackground(Params... params) {
+            try {
+                return ActivityTask.this.doInBackground(params);
+            } catch(Exception e) {
+                mException = e;
+                return null;
+            }
         }
+
         @Override
-        protected void onProgressUpdate(PROGRESS... values) {
+        protected void onProgressUpdate(Progress... values) {
             ActivityTask.this.onTaskProgress(values);
         }
+
         @Override
-        protected void onPostExecute(RESULT value) {
-            ActivityTask.this.onTaskComplete(value);
+        protected void onPostExecute(Result value) {
+            if(mException == null) {
+                ActivityTask.this.onTaskComplete(value);
+            } else {
+                ActivityTask.this.onTaskException(mException);
+            }
         }
+
         @Override
-        protected void onCancelled(RESULT value) {
+        protected void onCancelled(Result value) {
             ActivityTask.this.onTaskCancelled(value);
         }
 
-        protected void publishInternalProgress(PROGRESS value) {
+        protected void publishInternalProgress(Progress... value) {
             publishProgress(value);
         }
     }

@@ -3,14 +3,11 @@ package com.barenode.baretask;
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
 
-
 public class RetainedSupportFragment extends Fragment {
 
-    public static final String KILLED_TASK_IDS_KEY = "KILLED_TASK_IDS_KEY";
-
+    public static final String KILLED_TASK_IDS_KEY = RetainedNativeFragment.class.getName() + ".killedTaskIds";
 
     private final TaskManager mManager = new TaskManager();
-
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -25,7 +22,7 @@ public class RetainedSupportFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
-        mManager.setTasksActive(true);
+        mManager.onResume();
     }
 
     @Override
@@ -37,22 +34,19 @@ public class RetainedSupportFragment extends Fragment {
     @Override
     public void onPause() {
         super.onPause();
-        mManager.setTasksActive(false);
+        mManager.onPause();
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
-        // User hit the back button or called finish(), or OS cleaned up activity to reclaim resources
-        // Just cancel the workers so that the onCancelled(...) is triggered
-        mManager.cancelAllTask();
+        mManager.onDestroy();
     }
 
     @Override
     public void onDetach() {
         super.onDetach();
-        // Clear all callbacks when the fragment is detached from it's activity!
-        mManager.unregisterAllCallbacks();
+        mManager.onDetach();
     }
 
     public TaskManager getTaskManager() {
