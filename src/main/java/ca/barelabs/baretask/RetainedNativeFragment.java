@@ -1,4 +1,4 @@
-package com.barenode.baretask;
+package ca.barelabs.baretask;
 
 import android.annotation.TargetApi;
 import android.app.Fragment;
