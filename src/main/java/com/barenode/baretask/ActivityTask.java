@@ -3,25 +3,28 @@ package com.barenode.baretask;
 import android.content.Context;
 import android.os.AsyncTask;
 import android.os.Build;
+import android.os.SystemClock;
 
 public abstract class ActivityTask<Params, Progress, Result> {
 
-    interface OnTaskListener<Progress, Result> {
-        void onTaskProgress(ActivityTask task, Progress... progress);
-        void onTaskComplete(ActivityTask task, Result result);
-        void onTaskCancelled(ActivityTask task);
+    public static final int DEFAULT_TEST_DURATION = 5000;
+
+    interface OnTaskUpdatedListener {
+        void onTaskUpdated(long id);
     }
 
     private final Context mContext;
     private final InternalAsyncTask mInternalTask;
     private int mId;
-    private OnTaskListener<Progress, Result> mTaskListener;
+    private long mTaskId;
+    private OnTaskUpdatedListener mTaskListener;
     private Progress[] mProgress;
     private Result mResult;
     private Exception mException;
     private boolean mProgressPublished;
-    private boolean mCompleted;
-    private boolean mCancelled;
+    private boolean mResultCompleted;
+    private boolean mResultDelivered;
+    private int mTestDuration;
 
     public ActivityTask(Context context) {
         mContext = context.getApplicationContext();
@@ -37,21 +40,29 @@ public abstract class ActivityTask<Params, Progress, Result> {
     }
 
     public boolean isSuccessful() {
-        return mCompleted && mException == null;
+        return mResultCompleted && mException == null;
     }
 
     public Exception getException() {
         return mException;
     }
 
+    public void executeTest(Params... params) {
+        executeTest(DEFAULT_TEST_DURATION, params);
+    }
+
+    public void executeTest(int duration, Params... params) {
+        mTestDuration = duration;
+        execute(params);
+    }
+
     public void execute(Params... params) {
-        if(mInternalTask.getStatus() != AsyncTask.Status.PENDING) {
+        if (isStarted()) {
             throw new IllegalStateException("An ActivityTask can only be executed once!");
         }
-        if(Build.VERSION.SDK_INT >= 11) {
+        if (Build.VERSION.SDK_INT >= 11) {
             mInternalTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, params);
-        }
-        else {
+        } else {
             mInternalTask.execute(params);
         }
     }
@@ -76,48 +87,66 @@ public abstract class ActivityTask<Params, Progress, Result> {
         mId = id;
     }
 
-    void registerListener(OnTaskListener<Progress, Result> taskListener) {
+    void registerListener(long taskId, OnTaskUpdatedListener taskListener) {
+        mTaskId = taskId;
         mTaskListener = taskListener;
     }
 
-    boolean isRunning() {
-        return mInternalTask.getStatus() == AsyncTask.Status.RUNNING;
+    void unregisterListener() {
+        mTaskListener = null;
     }
 
-    void deliverResults() {
-        if(mTaskListener != null) {
-            if (mCancelled) {
-                mTaskListener.onTaskCancelled(this);
-            } else if (mCompleted) {
-                mTaskListener.onTaskComplete(this, mResult);
-            } else if (mProgressPublished) {
-                mTaskListener.onTaskProgress(this, mProgress);
-            }
-        }
+    boolean isStarted() {
+        return mInternalTask.getStatus() != AsyncTask.Status.PENDING;
+    }
+
+    boolean isPendingResult() {
+        return isStarted() && !mResultDelivered && !isCancelled();
+    }
+
+    void setResultDelivered() {
+        mResultDelivered = true;
+    }
+
+    boolean isProgressPublished() {
+        return mProgressPublished;
+    }
+
+    Progress[] getProgress() {
+        return mProgress;
+    }
+
+    boolean isResultCompleted() {
+        return mResultCompleted;
+    }
+
+    Result getResult() {
+        return mResult;
     }
 
     private void onTaskProgress(Progress... values) {
         mProgressPublished = true;
         mProgress = values;
-        deliverResults();
+        notifyListener();
     }
 
-    private void onTaskComplete(Result result) {
-        mCompleted = true;
+    private void onTaskComplete(Result result, Exception exception) {
+        mResultCompleted = true;
         mResult = result;
-        deliverResults();
-    }
-
-    private void onTaskException(Exception exception) {
-        mCompleted = true;
         mException = exception;
-        deliverResults();
+        notifyListener();
     }
 
     private void onTaskCancelled(Result result) {
-        mCancelled = true;
+        mResultDelivered = true;
         onCancelled(result);
-        deliverResults();
+        notifyListener();
+    }
+
+    private void notifyListener() {
+        if(mTaskListener != null) {
+            mTaskListener.onTaskUpdated(mTaskId);
+        }
     }
 
 
@@ -128,7 +157,12 @@ public abstract class ActivityTask<Params, Progress, Result> {
         @Override
         protected Result doInBackground(Params... params) {
             try {
-                return ActivityTask.this.doInBackground(params);
+                if(mTestDuration > 0) {
+                    SystemClock.sleep(mTestDuration);
+                    return null;
+                } else {
+                    return ActivityTask.this.doInBackground(params);
+                }
             } catch(Exception e) {
                 mException = e;
                 return null;
@@ -142,11 +176,7 @@ public abstract class ActivityTask<Params, Progress, Result> {
 
         @Override
         protected void onPostExecute(Result value) {
-            if(mException == null) {
-                ActivityTask.this.onTaskComplete(value);
-            } else {
-                ActivityTask.this.onTaskException(mException);
-            }
+            ActivityTask.this.onTaskComplete(value, mException);
         }
 
         @Override
