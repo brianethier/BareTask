@@ -92,6 +92,10 @@ public final class TaskManager implements ActivityTask.OnTaskUpdatedListener {
         }
     }
 
+    public void unregisterAllCallbacks() {
+        mRegisteredCallbacks.clear();
+    }
+
     public boolean isResultPending(int id) {
         for (Map.Entry<Long, ActivityTask> entry : mManagedTasks.entrySet()) {
             ActivityTask task = entry.getValue();
