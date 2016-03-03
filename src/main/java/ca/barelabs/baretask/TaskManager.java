@@ -80,8 +80,8 @@ public final class TaskManager implements ActivityTask.OnTaskUpdatedListener {
     }
 
     public void registerCallbacks(int id, TaskCallbacks<?,?> callbacks) {
-        if(mResumed || mRegisteredCallbacks.containsKey(id)) {
-            throw new IllegalStateException("You can only call registerCallbacks(...) once per id and before onResume().");
+        if (mRegisteredCallbacks.containsKey(id)) {
+            throw new IllegalStateException("You can only call registerCallbacks(...) once per id.");
         }
         mRegisteredCallbacks.put(id, callbacks);
     }
