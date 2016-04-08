@@ -114,6 +114,22 @@ public final class TaskManager implements ActivityTask.OnTaskUpdatedListener {
         }
     }
 
+    public void cancelResult(int id) {
+        ActivityTask task = mManagedTasks.get(id);
+        if (task != null) {
+            task.unregisterListener();
+            mManagedTasks.remove(id);
+        }
+    }
+
+    public void cancelAllResults() {
+        for (Map.Entry<Long, ActivityTask> entry : mManagedTasks.entrySet()) {
+            ActivityTask task = entry.getValue();
+            task.unregisterListener();
+        }
+        mManagedTasks.clear();
+    }
+
     ArrayList<Integer> getTaskIds() {
         ArrayList<Integer> ids = new ArrayList<Integer>();
         for (Map.Entry<Long, ActivityTask> entry : mManagedTasks.entrySet()) {
