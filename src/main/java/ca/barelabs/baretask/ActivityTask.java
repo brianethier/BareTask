@@ -3,7 +3,6 @@ package ca.barelabs.baretask;
 import android.content.Context;
 import android.os.AsyncTask;
 import android.os.Build;
-import android.os.SystemClock;
 
 public abstract class ActivityTask<Params, Progress, Result> {
 
@@ -24,7 +23,6 @@ public abstract class ActivityTask<Params, Progress, Result> {
     private boolean mProgressPublished;
     private boolean mResultCompleted;
     private boolean mResultDelivered;
-    private int mTestDuration;
 
     public ActivityTask(Context context) {
         mContext = context.getApplicationContext();
@@ -45,15 +43,6 @@ public abstract class ActivityTask<Params, Progress, Result> {
 
     public Exception getException() {
         return mException;
-    }
-
-    public void executeTest(Params... params) {
-        executeTest(DEFAULT_TEST_DURATION, params);
-    }
-
-    public void executeTest(int duration, Params... params) {
-        mTestDuration = duration;
-        execute(params);
     }
 
     public void execute(Params... params) {
@@ -157,12 +146,7 @@ public abstract class ActivityTask<Params, Progress, Result> {
         @Override
         protected Result doInBackground(Params... params) {
             try {
-                if(mTestDuration > 0) {
-                    SystemClock.sleep(mTestDuration);
-                    return null;
-                } else {
-                    return ActivityTask.this.doInBackground(params);
-                }
+                return ActivityTask.this.doInBackground(params);
             } catch(Exception e) {
                 mException = e;
                 return null;
