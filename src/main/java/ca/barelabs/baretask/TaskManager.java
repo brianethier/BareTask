@@ -1,13 +1,14 @@
 package ca.barelabs.baretask;
 
 import android.annotation.TargetApi;
+import android.app.Activity;
+import android.app.Fragment;
 import android.app.FragmentManager;
 import android.os.Handler;
+import android.support.v4.app.FragmentActivity;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -15,18 +16,36 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class TaskManager implements ActivityTask.OnTaskUpdatedListener {
 
     @TargetApi(11)
-    public static TaskManager findOrCreate(FragmentManager fm) {
+    public static TaskManager getInstance(Activity activity) {
+        return getInstance(activity.getFragmentManager());
+    }
+
+    public static TaskManager getInstance(FragmentActivity activity) {
+        return getInstance(activity.getSupportFragmentManager());
+    }
+
+    @TargetApi(11)
+    public static TaskManager getInstance(Fragment fragment) {
+        return getInstance(fragment.getFragmentManager());
+    }
+
+    public static TaskManager getInstance(android.support.v4.app.Fragment fragment) {
+        return getInstance(fragment.getFragmentManager());
+    }
+
+    @TargetApi(11)
+    private static TaskManager getInstance(FragmentManager fm) {
         RetainedNativeFragment fragment = (RetainedNativeFragment) fm.findFragmentByTag(TAG);
-        if(fragment == null) {
+        if (fragment == null) {
             fragment = new RetainedNativeFragment();
             fm.beginTransaction().add(fragment, TAG).commit();
         }
         return fragment.getTaskManager();
     }
 
-    public static TaskManager findOrCreate(android.support.v4.app.FragmentManager fm) {
+    private static TaskManager getInstance(android.support.v4.app.FragmentManager fm) {
         RetainedSupportFragment fragment = (RetainedSupportFragment) fm.findFragmentByTag(TAG);
-        if(fragment == null) {
+        if (fragment == null) {
             fragment = new RetainedSupportFragment();
             fm.beginTransaction().add(fragment, TAG).commit();
         }
@@ -34,14 +53,16 @@ public final class TaskManager implements ActivityTask.OnTaskUpdatedListener {
     }
 
     public interface OnTaskKilledListener {
-        void onTaskKilled(int id);
+        void onTaskKilled(long id);
     }
 
+    @SuppressWarnings("unchecked")
     public interface TaskCallbacks<Progress, Result> {
         void onTaskProgress(ActivityTask task, Progress... progress);
         void onTaskFinished(ActivityTask task, Result result);
     }
 
+    @SuppressWarnings("unchecked")
     public static abstract class TaskCallbacksAdapter<Progress, Result> implements TaskCallbacks<Progress, Result> {
         public void onTaskProgress(ActivityTask task, Progress... progress) {}
     }
@@ -49,10 +70,10 @@ public final class TaskManager implements ActivityTask.OnTaskUpdatedListener {
     private static final String TAG = TaskManager.class.getName() + "HSF48EHB732HR75HR63HE8";
     private static final AtomicLong NEXT_ID = new AtomicLong();
 
-    private final Map<Integer, TaskCallbacks> mRegisteredCallbacks = new HashMap<Integer, TaskCallbacks>();
-    private final Map<Long, ActivityTask> mManagedTasks = new TreeMap<Long, ActivityTask>();
-    private final List<Integer> mKilledTaskIds = new ArrayList<Integer>();
     private final Handler mHandler = new Handler();
+    private final Map<Long, TaskCallbacks> mCallbacksMap = new HashMap<>();
+    private final Map<Long, ActivityTask> mTasksMap = new TreeMap<>();
+    private long[] mKilledTaskIds;
     private OnTaskKilledListener mListener;
     private boolean mResumed;
 
@@ -62,10 +83,10 @@ public final class TaskManager implements ActivityTask.OnTaskUpdatedListener {
         mHandler.post(new Runnable() {
             @Override
             public void run() {
-                ActivityTask task = mManagedTasks.get(taskId);
+                ActivityTask task = mTasksMap.get(taskId);
                 if (task != null && deliverResult(task)) {
                     task.unregisterListener();
-                    mManagedTasks.remove(taskId);
+                    mTasksMap.remove(taskId);
                 }
             }
         });
@@ -79,72 +100,67 @@ public final class TaskManager implements ActivityTask.OnTaskUpdatedListener {
         mListener = null;
     }
 
-    public void registerCallbacks(int id, TaskCallbacks<?,?> callbacks) {
-        if (mRegisteredCallbacks.containsKey(id)) {
+    public void registerCallbacks(long callbackId, TaskCallbacks<?, ?> callbacks) {
+        if (mCallbacksMap.containsKey(callbackId)) {
             throw new IllegalStateException("You can only call registerCallbacks(...) once per id.");
         }
-        mRegisteredCallbacks.put(id, callbacks);
+        mCallbacksMap.put(callbackId, callbacks);
     }
 
-    public void unregisterCallbacks(int id) {
-        if(mRegisteredCallbacks.containsKey(id)) {
-            mRegisteredCallbacks.remove(id);
+    public void unregisterCallbacks(long callbackId) {
+        if (mCallbacksMap.containsKey(callbackId)) {
+            mCallbacksMap.remove(callbackId);
         }
     }
 
     public void unregisterAllCallbacks() {
-        mRegisteredCallbacks.clear();
+        mCallbacksMap.clear();
     }
 
-    public boolean isResultPending(int id) {
-        for (Map.Entry<Long, ActivityTask> entry : mManagedTasks.entrySet()) {
-            ActivityTask task = entry.getValue();
-            if (task.getId() == id && task.isPendingResult()) {
-                return true;
-            }
-        }
-        return false;
+    public boolean isResultPending(long callbackId) {
+        ActivityTask task = findTask(callbackId);
+        return task != null && task.isPendingResult();
     }
 
-    public void processResult(int id, ActivityTask<?,?,?> task) {
+    public void processResult(long callbackId, ActivityTask<?, ?, ?> task) {
         if (!task.isStarted()) {
-            task.execute();
+            throw new IllegalStateException("You must call execute() on your task before processing result.");
         }
-        task.setId(id);
+        task.setCallbackId(callbackId);
         if (!deliverResult(task)) {
             long taskId = NEXT_ID.getAndIncrement();
             task.registerListener(taskId, this);
-            mManagedTasks.put(taskId, task);
+            mTasksMap.put(taskId, task);
         }
     }
 
-    public void cancelResult(int id) {
-        ActivityTask task = mManagedTasks.get(id);
+    public void cancelResult(long callbackId) {
+        ActivityTask task = findTask(callbackId);
         if (task != null) {
             task.unregisterListener();
-            mManagedTasks.remove(id);
+            mTasksMap.remove(task.getTaskId());
         }
     }
 
     public void cancelAllResults() {
-        for (Map.Entry<Long, ActivityTask> entry : mManagedTasks.entrySet()) {
+        for (Map.Entry<Long, ActivityTask> entry : mTasksMap.entrySet()) {
             ActivityTask task = entry.getValue();
             task.unregisterListener();
         }
-        mManagedTasks.clear();
+        mTasksMap.clear();
     }
 
-    ArrayList<Integer> getTaskIds() {
-        ArrayList<Integer> ids = new ArrayList<Integer>();
-        for (Map.Entry<Long, ActivityTask> entry : mManagedTasks.entrySet()) {
-            ids.add(entry.getValue().getId());
+    long[] getTaskIds() {
+        long[] taskIds = new long[mTasksMap.size()];
+        int i = 0;
+        for (Long taskId : mTasksMap.keySet()) {
+            taskIds[i++] = taskId;
         }
-        return ids;
+        return taskIds;
     }
 
-    void setKilledTaskIds(List<Integer> ids) {
-        mKilledTaskIds.clear();
-        mKilledTaskIds.addAll(ids);
+    void setKilledTaskIds(long[] taskIds) {
+        mKilledTaskIds = taskIds;
     }
 
     void onResume() {
@@ -153,7 +169,7 @@ public final class TaskManager implements ActivityTask.OnTaskUpdatedListener {
             @Override
             public void run() {
                 deliverKilledTaskIds();
-                Iterator<Map.Entry<Long, ActivityTask>> iterator = mManagedTasks.entrySet().iterator();
+                Iterator<Map.Entry<Long, ActivityTask>> iterator = mTasksMap.entrySet().iterator();
                 while (iterator.hasNext()) {
                     if (deliverResult(iterator.next().getValue())) {
                         iterator.remove();
@@ -170,36 +186,47 @@ public final class TaskManager implements ActivityTask.OnTaskUpdatedListener {
     void onDestroy() {
         // User hit the back button or called finish(), or OS cleaned up activity to reclaim resources
         // Just cancel the workers so that the onCancelled(...) is triggered
-        for (Map.Entry<Long, ActivityTask> entry : mManagedTasks.entrySet()) {
+        for (Map.Entry<Long, ActivityTask> entry : mTasksMap.entrySet()) {
             ActivityTask task = entry.getValue();
             task.unregisterListener();
             task.cancel(false);
         }
-        mManagedTasks.clear();
+        mTasksMap.clear();
     }
 
     void onDetach() {
         // Clear all callbacks when the fragment is detached from it's activity!
-        mRegisteredCallbacks.clear();
+        mCallbacksMap.clear();
+    }
+
+    private ActivityTask findTask(long callbackId) {
+        for (Map.Entry<Long, ActivityTask> entry : mTasksMap.entrySet()) {
+            ActivityTask task = entry.getValue();
+            if (task.getCallbackId() == callbackId && task.isPendingResult()) {
+                return task;
+            }
+        }
+        return null;
     }
 
     private void deliverKilledTaskIds() {
         if(mResumed) {
-            if (mListener != null) {
-                for (Integer id : mKilledTaskIds) {
+            if (mListener != null && mKilledTaskIds != null) {
+                for (Long id : mKilledTaskIds) {
                     mListener.onTaskKilled(id);
                 }
             }
-            mKilledTaskIds.clear();
+            mKilledTaskIds = null;
         }
     }
 
+    @SuppressWarnings("unchecked")
     private boolean deliverResult(ActivityTask task) {
         if (!mResumed) {
             return false;
         }
         if (task.isPendingResult()) {
-            TaskCallbacks callbacks = mRegisteredCallbacks.get(task.getId());
+            TaskCallbacks callbacks = mCallbacksMap.get(task.getCallbackId());
             if (callbacks != null) {
                 if (task.isResultCompleted()) {
                     task.setResultDelivered();

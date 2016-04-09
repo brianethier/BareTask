@@ -14,7 +14,7 @@ public abstract class ActivityTask<Params, Progress, Result> {
 
     private final Context mContext;
     private final InternalAsyncTask mInternalTask;
-    private int mId;
+    private long mCallbackId;
     private long mTaskId;
     private OnTaskUpdatedListener mTaskListener;
     private Progress[] mProgress;
@@ -33,8 +33,8 @@ public abstract class ActivityTask<Params, Progress, Result> {
         return mContext;
     }
 
-    public int getId() {
-        return mId;
+    public long getId() {
+        return mCallbackId;
     }
 
     public boolean isSuccessful() {
@@ -45,6 +45,7 @@ public abstract class ActivityTask<Params, Progress, Result> {
         return mException;
     }
 
+    @SuppressWarnings("unchecked")
     public void execute(Params... params) {
         if (isStarted()) {
             throw new IllegalStateException("An ActivityTask can only be executed once!");
@@ -56,6 +57,7 @@ public abstract class ActivityTask<Params, Progress, Result> {
         }
     }
 
+    @SuppressWarnings("unchecked")
     public abstract Result doInBackground(Params... params) throws Exception;
 
     public abstract void onCancelled(Result value);
@@ -64,6 +66,7 @@ public abstract class ActivityTask<Params, Progress, Result> {
         return mInternalTask.isCancelled();
     }
 
+    @SuppressWarnings("unchecked")
     protected void publishProgress(Progress... progress) {
         mInternalTask.publishInternalProgress(progress);
     }
@@ -72,8 +75,16 @@ public abstract class ActivityTask<Params, Progress, Result> {
         mInternalTask.cancel(mayInterruptIfRunning);
     }
 
-    void setId(int id) {
-        mId = id;
+    long getCallbackId() {
+        return mCallbackId;
+    }
+
+    void setCallbackId(long id) {
+        mCallbackId = id;
+    }
+
+    long getTaskId() {
+        return mTaskId;
     }
 
     void registerListener(long taskId, OnTaskUpdatedListener taskListener) {
@@ -113,6 +124,7 @@ public abstract class ActivityTask<Params, Progress, Result> {
         return mResult;
     }
 
+    @SuppressWarnings("unchecked")
     private void onTaskProgress(Progress... values) {
         mProgressPublished = true;
         mProgress = values;
@@ -143,6 +155,7 @@ public abstract class ActivityTask<Params, Progress, Result> {
 
         private Exception mException;
 
+        @SuppressWarnings("unchecked")
         @Override
         protected Result doInBackground(Params... params) {
             try {
@@ -153,6 +166,7 @@ public abstract class ActivityTask<Params, Progress, Result> {
             }
         }
 
+        @SuppressWarnings("unchecked")
         @Override
         protected void onProgressUpdate(Progress... values) {
             ActivityTask.this.onTaskProgress(values);
@@ -168,6 +182,7 @@ public abstract class ActivityTask<Params, Progress, Result> {
             ActivityTask.this.onTaskCancelled(value);
         }
 
+        @SuppressWarnings("unchecked")
         protected void publishInternalProgress(Progress... value) {
             publishProgress(value);
         }

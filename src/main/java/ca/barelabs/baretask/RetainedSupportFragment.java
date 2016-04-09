@@ -15,7 +15,7 @@ public class RetainedSupportFragment extends Fragment {
         setRetainInstance(true);
         // If this is being called with a Bundle then the activity was killed by the OS and re-created
         if(savedInstanceState != null) {
-            mManager.setKilledTaskIds(savedInstanceState.getIntegerArrayList(KILLED_TASK_IDS_KEY));
+            mManager.setKilledTaskIds(savedInstanceState.getLongArray(KILLED_TASK_IDS_KEY));
         }
     }
 
@@ -27,7 +27,7 @@ public class RetainedSupportFragment extends Fragment {
 
     @Override
     public void onSaveInstanceState(Bundle outState) {
-        outState.putIntegerArrayList(KILLED_TASK_IDS_KEY, mManager.getTaskIds());
+        outState.putLongArray(KILLED_TASK_IDS_KEY, mManager.getTaskIds());
         super.onSaveInstanceState(outState);
     }
 
